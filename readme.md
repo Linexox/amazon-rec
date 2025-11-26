@@ -1,6 +1,6 @@
-# file structure
+## file structure
 
-```
+```plain
 /data               # raw data files 
 /model              # model files
 /preprocess         # preprocessing scripts
