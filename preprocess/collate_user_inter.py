@@ -1,5 +1,6 @@
 import os
 import json
+# import requests
 import numpy as np
 
 from pathlib import Path
@@ -21,10 +22,10 @@ def collate_user_interactions(raw_data: dict,):
             user_inter[userId] = []
         user_inter[userId].append(inter)
     
-    for u_idx, inters in user_inter.items():
+    for user_id, inters in user_inter.items():
         inters.sort(key=lambda x: x['time'])
         new_data.append({
-            'user_idx': u_idx,
+            'user_id': user_id,
             'interactions': inters
         })
 

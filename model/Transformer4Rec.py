@@ -305,7 +305,7 @@ class MmTransformer4Rec(torch.nn.Module):
     def compute_loss(
         self,
         logits,
-        target_items: torch.Tensor # (batch_size,)
+        target_items:  torch.Tensor # (batch_size,)
     ):
         loss = self.loss_fn(logits, target_items)
         return loss
