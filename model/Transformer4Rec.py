@@ -210,35 +210,36 @@ class MmItemEncoder(torch.nn.Module):
 class MmTransformer4Rec(torch.nn.Module):
     def __init__(
         self,
-        config,
-        # n_items: int,
-        # txt_dim: int,
-        # img_dim: int,
-        # hidden_dim: int = 512,
-        # n_heads: int = 8,
-        # n_layers: int = 2,
-        # ffn_dim: int = 2048,
-        # max_seq_len: int = 100,
-        # dropout: float = 0.1,
-        # device: str = 'cpu'
+        config: dict,
     ): 
         super().__init__()
-        # self.hidden_dim = hidden_dim
-        # self.n_items = n_items
-        # self.device = device
-        for k, v in config.__dict__.items():
+        for k, v in config.items():
             setattr(self, k, v)
 
-        self.item_encoder = MmItemEncoder(self.txt_dim, self.img_dim, self.hidden_dim, dropout=self.dropout)
-        self.positional_embedding = PositionalEmbedding(self.hidden_dim, self.max_seq_len, dropout=self.dropout)
+        self.loss_fn = torch.nn.CrossEntropyLoss()
+        self.item_encoder = MmItemEncoder(
+            self.txt_dim,
+            self.img_dim,
+            self.hidden_dim,
+            dropout=self.dropout
+        )
+        self.positional_embedding = PositionalEmbedding(
+            self.hidden_dim,
+            self.max_seq_len,
+            dropout=self.dropout
+        )
 
         self.encoder_blocks = torch.nn.ModuleList([
-            TransformerEncoderBlock(self.hidden_dim, self.n_heads, self.ffn_dim, dropout=self.dropout)
-            for _ in range(self.n_layers)
+            TransformerEncoderBlock(
+                self.hidden_dim,
+                self.n_heads,
+                self.ffn_dim,
+                dropout=self.dropout
+            ) for _ in range(self.n_layers)
         ])
 
         self.final_norm = RMSNorm(self.hidden_dim)
-        self.pred_head = torch.nn.Linear(self.hidden_dim, self.n_items)
+        self.item_embeddings = torch.nn.Embedding(self.n_items, self.hidden_dim)
         self._init_weights()
     
     def _init_weights(self):
@@ -264,6 +265,9 @@ class MmTransformer4Rec(torch.nn.Module):
         seq_lens: list = None
     ):
         batch_size = txt_embs.size(0)
+        mask = None
+        if seq_lens is not None:
+            mask = self.create_padding_mask(seq_lens) # (batch_size, seq_len, seq_len)
         
         x = self.item_encoder(
             txt_embs.view(-1, txt_embs.size(-1)), # (batch_size * seq_len, txt_dim)
@@ -271,31 +275,40 @@ class MmTransformer4Rec(torch.nn.Module):
         ) # (batch_size * seq_len, hidden_dim)
         x = x.view(batch_size, txt_embs.size(1), -1) # (batch_size, seq_len, hidden_dim)
         x = self.positional_embedding(x) # (batch_size, seq_len, hidden_dim)
-        
-        mask = None
-        if seq_lens is not None:
-            mask = self.create_padding_mask(seq_lens) # (batch_size, seq_len, seq_len)
-        
         for encoder in self.encoder_blocks:
             x, _ = encoder(x, mask=mask) # (batch_size, seq_len, hidden_dim)
-        
         x = self.final_norm(x) # (batch_size, seq_len, hidden_dim)
-        logits = self.pred_head(x) # (batch_size, seq_len, n_items)
-        return logits
 
-    def predict_topk_items(
+        # user_repr = x.mean(dim=1) # (batch_size, hidden_dim)
+        if seq_lens is not None:
+            batch_indices = torch.arange(batch_size, device=self.device)
+            last_indices = torch.tensor([l-1 for l in seq_lens], device=self.device)
+            user_repr = x[batch_indices, last_indices, :] # (batch_size, hidden_dim)
+        else:
+            user_repr = x.mean(dim=1) # (batch_size, hidden_dim)
+        logits = user_repr @ self.item_embeddings.weight.T # (batch_size, n_items)
+        return logits, user_repr # logits: (batch_size, n_items), user_repr: (batch_size, hidden_dim)
+    
+    def predict_topk(
         self,
         txt_embs: torch.Tensor, # (batch_size, seq_len, txt_dim)
         img_embs: torch.Tensor, # (batch_size, seq_len, img_dim)
         seq_lens: list = None,
-        k: int = 10
+        topk: int = 1
     ): 
         self.eval()
         with torch.no_grad():
-            logits = self.forward(txt_embs, img_embs, seq_lens) # (batch_size, seq_len, n_items)
-            last_logits = logits[:, -1, :] # (batch_size, n_items)
-            topk_scores, topk_indices = torch.topk(last_logits, k, dim=-1)
-        return topk_indices, topk_scores
+            logits, _ = self.forward(txt_embs, img_embs, seq_lens)
+            topk_scores, topk_indices = torch.topk(logits, k=topk, dim=-1)
+        return topk_scores, topk_indices
+
+    def compute_loss(
+        self,
+        logits,
+        target_items: torch.Tensor # (batch_size,)
+    ):
+        loss = self.loss_fn(logits, target_items)
+        return loss
 
 if __name__ == "__main__":
     config = {
@@ -319,8 +332,4 @@ if __name__ == "__main__":
     seq_lens = [10, 8, 9, 7]
 
     logits = model(txt_embs, img_embs, seq_lens)
-    print("Logits shape:", logits.shape)  # Expected: (batch_size, seq_len, n_items)
-
-    topk_indices, topk_scores = model.predict_topk_items(txt_embs, img_embs, seq_lens, k=5)
-    print("Top-k indices shape:", topk_indices.shape)  # Expected: (batch_size, k)
-    print("Top-k scores shape:", topk_scores.shape)    # Expected: (batch_size, k)
+    
