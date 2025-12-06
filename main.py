@@ -3,6 +3,8 @@ import torch
 import numpy as np
 import numpy.random as npr
 
+from time import time
+from pathlib import Path
 from loguru import logger
 from dataset import AmazonDataset
 from model import MmTransformer4Rec
@@ -27,20 +29,17 @@ class MmTransformer4RecDataLoader:
             yield self.collate_fn(batch)
 
     def collate_fn(self, batch):
-        batch_inter_ids = []
         batch_item_ids = []
         batch_txt_embs = []
         batch_img_embs = []
         batch_targets = []
         batch_seq_lens = []
         for data_point in batch:
-            inter_ids = data_point['inter_ids']
-            item_ids = data_point['item_ids']
-            txt_embs = data_point['txt_embs']
-            img_embs = data_point['img_embs']
-            seq_lens = (item_ids[:-1] != 0).sum().item()
+            item_ids = data_point.item_ids  
+            txt_embs = data_point.txt_embs  
+            img_embs = data_point.img_embs
+            seq_lens = sum([1 for id in item_ids if id != 0])
 
-            batch_inter_ids.append(inter_ids[:-1])
             batch_item_ids.append(item_ids[:-1])
             batch_txt_embs.append(txt_embs[:-1])
             batch_img_embs.append(img_embs[:-1])
@@ -48,7 +47,6 @@ class MmTransformer4RecDataLoader:
             batch_seq_lens.append(seq_lens)
 
         return {
-            'inter_ids': torch.tensor(batch_inter_ids, dtype=torch.long),
             'item_ids': torch.tensor(batch_item_ids, dtype=torch.long),
             'txt_embs': torch.stack(batch_txt_embs),
             'img_embs': torch.stack(batch_img_embs),
@@ -85,7 +83,7 @@ class Trainer:
             targets = batch['targets'].to(self.model.device)
             seq_lens = batch['seq_lens']
 
-            outputs, _ = self.model(
+            outputs = self.model(
                 txt_embs=txt_embs,
                 img_embs=img_embs,
                 seq_lens=seq_lens
@@ -93,7 +91,8 @@ class Trainer:
             # compute loss
             loss = self.model.compute_loss(
                 logits=outputs,
-                targets=targets
+                target_items=targets,
+                seq_lens=seq_lens
             )
             # backward pass and optimization
             self.optimizer.zero_grad()
@@ -138,15 +137,20 @@ class Trainer:
                 targets = batch['targets'].to(self.model.device)
                 seq_lens = batch['seq_lens']
                 
-                logits, user_repr = self.model(
+                logits = self.model(
                     txt_embs=txt_embs,
                     img_embs=img_embs,
                     seq_lens=seq_lens
                 )
                 
-                loss = self.model.compute_loss(logits=logits, target_items=targets)
+                loss = self.model.compute_loss(
+                    logits=logits,
+                    target_items=targets,
+                    seq_lens=seq_lens
+                )
                 total_loss += loss.item()
 
+                logits = logits[:, -1, :]  # (batch_size, n_items)
                 # HR
                 for at_k in hr.keys():
                     k = int(at_k[1:])
@@ -167,9 +171,6 @@ class Trainer:
                             rank = (topk_items[i] == target_item).nonzero(as_tuple=True)[0].item() + 1
                             ndgc[at_k][0] += 1 / np.log2(rank + 1)
                         ndgc[at_k][1] += 1
-                
-               
-                
         metrics = { 'loss': total_loss / (batch_idx + 1) }
         for at_k in hr.keys():
             metrics[f'HR{at_k}'] = hr[at_k][0] / hr[at_k][1] if hr[at_k][1] > 0 else 0.0
@@ -177,3 +178,38 @@ class Trainer:
             metrics[f'NDCG{at_k}'] = ndgc[at_k][0] / ndgc[at_k][1] if ndgc[at_k][1] > 0 else 0.0
         return metrics
 
+if __name__ == "__main__":
+    cur_time = time().strftime("%Y%m%d_%H%M%S", time.localtime())
+
+    ROOT_PATH = Path(__file__).parent
+    DATA_PATH = ROOT_PATH / "data" / "preprocessed"
+    LOGS_PATH = ROOT_PATH / "logs"
+    LOG_FILE = LOGS_PATH / f"train_{cur_time}.log"
+    logger.add(LOG_FILE, rotation="10 MB")
+
+    config = {
+        'dataset': {
+            'path': str(DATA_PATH),
+            'train_ratio': 0.8,
+        },
+        'model': {
+            'n_items': 286,  # Placeholder, should be set according to dataset
+            'hidden_dim': 512,
+            'txt_dim': 768,
+            'img_dim': 768,
+            'n_heads': 8,
+            'n_layers': 2,
+            'ffn_dim': 2048,
+            'max_seq_len': 50,
+            'dropout': 0.1,
+            'device': 'cuda' if torch.cuda.is_available() else 'cpu',
+        },
+        'train': {
+            'batch_size': 32,
+            'learning_rate': 1e-4,
+            'num_epochs': 10,
+            'log_interval': 10,
+        }
+    }
+    trainer = Trainer(config)
+    trainer.train()

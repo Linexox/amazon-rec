@@ -279,15 +279,17 @@ class MmTransformer4Rec(torch.nn.Module):
             x, _ = encoder(x, mask=mask) # (batch_size, seq_len, hidden_dim)
         x = self.final_norm(x) # (batch_size, seq_len, hidden_dim)
 
-        # user_repr = x.mean(dim=1) # (batch_size, hidden_dim)
-        if seq_lens is not None:
-            batch_indices = torch.arange(batch_size, device=self.device)
-            last_indices = torch.tensor([l-1 for l in seq_lens], device=self.device)
-            user_repr = x[batch_indices, last_indices, :] # (batch_size, hidden_dim)
-        else:
-            user_repr = x.mean(dim=1) # (batch_size, hidden_dim)
-        logits = user_repr @ self.item_embeddings.weight.T # (batch_size, n_items)
-        return logits, user_repr # logits: (batch_size, n_items), user_repr: (batch_size, hidden_dim)
+        logits = torch.matmul(x, self.item_embeddings.weight.T) # (batch_size, seq_len, n_items)
+        return logits
+        # # user_repr = x.mean(dim=1) # (batch_size, hidden_dim)
+        # if seq_lens is not None:
+        #     batch_indices = torch.arange(batch_size, device=self.device)
+        #     last_indices = torch.tensor([l-1 for l in seq_lens], device=self.device)
+        #     user_repr = x[batch_indices, last_indices, :] # (batch_size, hidden_dim)
+        # else:
+        #     user_repr = x.mean(dim=1) # (batch_size, hidden_dim)
+        # logits = user_repr @ self.item_embeddings.weight.T # (batch_size, n_items)
+        # return logits, user_repr # logits: (batch_size, n_items), user_repr: (batch_size, hidden_dim)
     
     def predict_topk(
         self,
@@ -305,9 +307,21 @@ class MmTransformer4Rec(torch.nn.Module):
     def compute_loss(
         self,
         logits,
-        target_items:  torch.Tensor # (batch_size,)
+        target_items:  torch.Tensor, # (batch_size, seq_len)
+        seq_lens: list =None
     ):
-        loss = self.loss_fn(logits, target_items)
+        batch_size, seq_len, n_items = logits.size()
+        if seq_lens is not None:
+            mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=self.device)
+            for i, l in enumerate(seq_lens):
+                mask[i, :l] = 1
+            logits_flat = logits.view(-1, n_items) # (batch_size * seq_len, n_items)
+            targets_flat = target_items.view(-1)  # (batch_size * seq_len,)
+            loss = self.loss_fn(logits_flat, targets_flat, reduction='none') # (batch_size * seq_len,)
+            loss = loss * mask.view(-1).float()
+            loss = loss.sum() / mask.sum() * 1.0
+        else:
+            raise NotImplementedError("Loss computation without seq_lens is not implemented.")
         return loss
 
 if __name__ == "__main__":
