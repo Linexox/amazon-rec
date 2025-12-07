@@ -84,12 +84,15 @@ class Attention(torch.nn.Module):
         q: torch.Tensor, # (batch_size, seq_len, d_k)
         k: torch.Tensor, # (batch_size, seq_len, d_k)
         v: torch.Tensor, # (batch_size, seq_len, d_k)
-        mask: Optional[torch.Tensor] = None # (batch_size, seq_len, seq_len)
+        mask: Optional[torch.Tensor] = None
     ):
+        # print(q.shape)
+        # print(mask.shape)
         d_k = q.size(-1)
         k_t = k.transpose(-2, -1) # (batch_size, d_k, seq_len)
         scores = torch.matmul(q, k_t) / math.sqrt(d_k) # (batch_size, seq_len, seq_len)
         if mask is not None:
+            mask = mask.unsqueeze(1).unsqueeze(2)
             scores = scores.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(scores, dim=-1) # (batch_size, seq_len, seq_len)
         attn = self.dropout(attn)
@@ -122,7 +125,7 @@ class MHAttention(torch.nn.Module):
         q: torch.Tensor, # (batch_size, seq_len, hidden_dim)
         k: torch.Tensor, # (batch_size, seq_len, hidden_dim)
         v: torch.Tensor, # (batch_size, seq_len, hidden_dim)
-        mask: Optional[torch.Tensor] = None # (batch_size, seq_len, seq_len)
+        mask: Optional[torch.Tensor] = None # (batch_size, seq_len)
     ):
         batch_size = q.size(0)
 
@@ -133,9 +136,9 @@ class MHAttention(torch.nn.Module):
         v = self.Wv(v) # (batch_size, seq_len, hidden_dim)
         v = v.view(batch_size, -1, self.n_heads, self.d_k).transpose(1, 2) # (batch_size, n_heads, seq_len, d_k)
 
-        if mask is not None:
-            mask = mask.unsqueeze(1) # (batch_size, 1, seq_len, seq_len)
-        
+        # if mask is not None:
+        #     mask = mask.unsqueeze(1)
+            # mask = mask.unsqueeze(1).unsqueeze(2)  # (batch_size, 1, 1, seq_len)
         output, attn = self.attention(q, k, v, mask=mask) # output: (batch_size, n_heads, seq_len, d_k)
 
         output = output.transpose(1, 2).contiguous() # (batch_size, seq_len, n_heads, d_k)
@@ -216,7 +219,7 @@ class MmTransformer4Rec(torch.nn.Module):
         for k, v in config.items():
             setattr(self, k, v)
 
-        self.loss_fn = torch.nn.CrossEntropyLoss()
+        self.loss_fn = torch.nn.CrossEntropyLoss(reduction='none', ignore_index=-100)
         self.item_encoder = MmItemEncoder(
             self.txt_dim,
             self.img_dim,
@@ -244,7 +247,9 @@ class MmTransformer4Rec(torch.nn.Module):
     
     def _init_weights(self):
         for p in self.parameters():
-            if p.dim() > 1:
+            if 'embedding' in p.__class__.__name__.lower():
+                torch.nn.init.normal_(p, mean=0.0, std=0.02)
+            elif p.dim() > 1:
                 torch.nn.init.xavier_uniform_(p)
     
     def create_padding_mask(
@@ -253,10 +258,14 @@ class MmTransformer4Rec(torch.nn.Module):
     ):
         batch_size = len(seq_lens)
         max_len = max(seq_lens)
-        mask = torch.zeros(batch_size, max_len, max_len)
-        for i, seq_len in enumerate(seq_lens):
-            mask[i, :seq_len, :seq_len] = 1
-        return mask.to(self.device)
+        mask = torch.zeros(batch_size, max_len, dtype=torch.bool, device=self.device)
+        for i, l in enumerate(seq_lens):
+            mask[i, :l] = 1
+        return mask
+        # mask = torch.zeros(batch_size, max_len, max_len)
+        # for i, seq_len in enumerate(seq_lens):
+        #     mask[i, :seq_len, :seq_len] = 1
+        # return mask.to(self.device)
 
     def forward(
         self,
@@ -265,6 +274,7 @@ class MmTransformer4Rec(torch.nn.Module):
         seq_lens: list = None
     ):
         batch_size = txt_embs.size(0)
+        seq_len = txt_embs.size(1)
         mask = None
         if seq_lens is not None:
             mask = self.create_padding_mask(seq_lens) # (batch_size, seq_len, seq_len)
@@ -273,7 +283,7 @@ class MmTransformer4Rec(torch.nn.Module):
             txt_embs.view(-1, txt_embs.size(-1)), # (batch_size * seq_len, txt_dim)
             img_embs.view(-1, img_embs.size(-1))  # (batch_size * seq_len, img_dim)
         ) # (batch_size * seq_len, hidden_dim)
-        x = x.view(batch_size, txt_embs.size(1), -1) # (batch_size, seq_len, hidden_dim)
+        x = x.view(batch_size, seq_len, -1) # (batch_size, seq_len, hidden_dim)
         x = self.positional_embedding(x) # (batch_size, seq_len, hidden_dim)
         for encoder in self.encoder_blocks:
             x, _ = encoder(x, mask=mask) # (batch_size, seq_len, hidden_dim)
@@ -306,18 +316,19 @@ class MmTransformer4Rec(torch.nn.Module):
 
     def compute_loss(
         self,
-        logits,
+        logits: torch.Tensor, # (batch_size, seq_len, n_items)
         target_items:  torch.Tensor, # (batch_size, seq_len)
         seq_lens: list =None
     ):
-        batch_size, seq_len, n_items = logits.size()
+        batch_size, seq_len, n_items = logits.shape
         if seq_lens is not None:
             mask = torch.zeros(batch_size, seq_len, dtype=torch.bool, device=self.device)
             for i, l in enumerate(seq_lens):
                 mask[i, :l] = 1
             logits_flat = logits.view(-1, n_items) # (batch_size * seq_len, n_items)
             targets_flat = target_items.view(-1)  # (batch_size * seq_len,)
-            loss = self.loss_fn(logits_flat, targets_flat, reduction='none') # (batch_size * seq_len,)
+            loss = self.loss_fn(logits_flat, targets_flat) # (batch_size * seq_len,)
+            # torch.nn.CrossEntropyLoss()
             loss = loss * mask.view(-1).float()
             loss = loss.sum() / mask.sum() * 1.0
         else:
@@ -345,5 +356,11 @@ if __name__ == "__main__":
     img_embs = torch.randn(batch_size, seq_len, 2048)
     seq_lens = [10, 8, 9, 7]
 
-    logits = model(txt_embs, img_embs, seq_lens)
+    logits = model(
+        txt_embs=txt_embs,
+        img_embs=img_embs,
+        seq_lens=seq_lens
+    )
+    print("Logits shape:", logits.shape)  # Expected: (batch_size, seq_len, n_items)
+    print(logits[2,:,:])
     

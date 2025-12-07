@@ -27,8 +27,8 @@ class AmazonDataset:
         self.data_path = Path(self.path)
 
         self._load_data()
-        self._filter_data()
-        self.collated_data = self._load_other_data()
+        # self._filter_data()
+        self._load_other_data()
         self.all_data = self._augment_and_add(self.collated_data)
         self.train_data, self.test_data = self.split_data(self.all_data, self.train_ratio)
 
@@ -85,7 +85,7 @@ class AmazonDataset:
         ]
         img_embs = [
             self.img_embs.get(inter_id, DUMMY_IMG_EMB)
-            for inter_id in inter_ids
+            for inter_id in inter_ids 
         ]
         txt_embs = torch.stack(txt_embs, dim=0)  # (seq_len, hidden_size)
         img_embs = torch.stack(img_embs, dim=0)  # (seq_len, hidden_size)

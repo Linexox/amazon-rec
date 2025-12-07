@@ -1,1 +1,1 @@
-from amazon import AmazonDataset, RecDataPoint
+from .amazon import AmazonDataset, RecDataPoint
