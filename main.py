@@ -156,8 +156,8 @@ class Trainer:
         self.model.eval()
         total_loss = 0
 
-        hr = { '@5': 0, '@10': 0, '@20': 0 }
-        ndcg = { '@5': 0,  '@10': 0, '@20': 0 }
+        hr = { '@5': 0, '@10': 0, '@20': 0 } # hit rate 
+        ndcg = { '@5': 0,  '@10': 0, '@20': 0 } # 
         total_samples = 0
         with torch.no_grad():
             for batch_idx, batch in enumerate(self.dataloader.__iter__(mode='test')):

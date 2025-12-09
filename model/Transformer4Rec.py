@@ -262,10 +262,6 @@ class MmTransformer4Rec(torch.nn.Module):
         for i, l in enumerate(seq_lens):
             mask[i, :l] = 1
         return mask
-        # mask = torch.zeros(batch_size, max_len, max_len)
-        # for i, seq_len in enumerate(seq_lens):
-        #     mask[i, :seq_len, :seq_len] = 1
-        # return mask.to(self.device)
 
     def forward(
         self,

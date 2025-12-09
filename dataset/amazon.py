@@ -29,8 +29,10 @@ class AmazonDataset:
         self._load_data()
         # self._filter_data()
         self._load_other_data()
-        self.all_data = self._augment_and_add(self.collated_data)
-        self.train_data, self.test_data = self.split_data(self.all_data, self.train_ratio)
+        # self.all_data = self._augment_and_add(self.collated_data)
+        self.train_data, self.test_data = self.split_data(self.collated_data, self.train_ratio)
+        self.train_data = self._augment_and_add(self.train_data)
+        self.test_data = self._augment_and_add(self.test_data)
 
     def _load_data(self):
         with open(self.data_path / 'collated_data.json', 'r') as f:
