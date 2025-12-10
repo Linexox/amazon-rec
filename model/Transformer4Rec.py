@@ -92,7 +92,7 @@ class Attention(torch.nn.Module):
         k_t = k.transpose(-2, -1) # (batch_size, d_k, seq_len)
         scores = torch.matmul(q, k_t) / math.sqrt(d_k) # (batch_size, seq_len, seq_len)
         if mask is not None:
-            mask = mask.unsqueeze(1).unsqueeze(2)
+            mask = mask.unsqueeze(1)
             scores = scores.masked_fill(mask == 0, float('-inf'))
         attn = F.softmax(scores, dim=-1) # (batch_size, seq_len, seq_len)
         attn = self.dropout(attn)
@@ -192,10 +192,12 @@ class MmItemEncoder(torch.nn.Module):
         super().__init__()
         self.txt_dim = txt_dim
         self.img_dim = img_dim
+        # self.img_dim = 0
+        # self.txt_dim = 0
         self.hidden_dim = hidden_dim
 
         self.proj = torch.nn.Sequential(
-            torch.nn.Linear(txt_dim + img_dim, hidden_dim),
+            torch.nn.Linear(self.txt_dim + self.img_dim, hidden_dim),
             torch.nn.LayerNorm(hidden_dim),
             torch.nn.GELU(),
             torch.nn.Dropout(p=dropout),
@@ -207,6 +209,8 @@ class MmItemEncoder(torch.nn.Module):
         img_emb: torch.Tensor  # (batch_size, img_dim)
     ):
         x = torch.cat([txt_emb, img_emb], dim=-1) # (batch_size, txt_dim + img_dim)
+        # x = txt_emb
+        # x = img_emb
         x = self.proj(x) # (batch_size, hidden_dim)
         return x
     
@@ -262,6 +266,20 @@ class MmTransformer4Rec(torch.nn.Module):
         for i, l in enumerate(seq_lens):
             mask[i, :l] = 1
         return mask
+    
+    def create_causal_mask(
+        self,
+        seq_lens: int
+    ):
+        batch_size = len(seq_lens)
+        max_len = max(seq_lens)
+        causal_mask = torch.tril(torch.ones((max_len, max_len), dtype=torch.bool, device=self.device))
+        causal_mask = causal_mask.unsqueeze(0).repeat(batch_size, 1, 1) # (batch_size, max_len, max_len)
+
+        padding_mask = self.create_padding_mask(seq_lens) # (batch_size, max_len)
+        padding_mask = padding_mask.unsqueeze(1) # (batch_size, 1, max_len)
+        mask = causal_mask & padding_mask  # (batch_size, max_len, max_len)
+        return mask
 
     def forward(
         self,
@@ -273,7 +291,8 @@ class MmTransformer4Rec(torch.nn.Module):
         seq_len = txt_embs.size(1)
         mask = None
         if seq_lens is not None:
-            mask = self.create_padding_mask(seq_lens) # (batch_size, seq_len, seq_len)
+            # mask = self.create_padding_mask(seq_lens) # (batch_size, seq_len, seq_len)
+            mask = self.create_causal_mask(seq_lens) # (batch_size, seq_len, seq_len)
         
         x = self.item_encoder(
             txt_embs.view(-1, txt_embs.size(-1)), # (batch_size * seq_len, txt_dim)

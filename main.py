@@ -129,6 +129,8 @@ class Trainer:
 
     def train(self):
         min_loss = float('inf')
+        early_stop_count = 0
+        min_loss = float('inf')
         for epoch in range(self.train_config['num_epochs']):
             logger.info(f"Starting epoch {epoch+1} / {self.train_config['num_epochs']}")
             train_metrics = self.train_epoch(epoch)
@@ -197,7 +199,7 @@ class Trainer:
                         target_item = targets[i, seq_lens[i]-1].item()
                         if target_item in topk_items[i]:
                             rank = (topk_items[i] == target_item).nonzero(as_tuple=True)[0].item() + 1
-                            ndcg[at_k] += 1 / np.log2(rank + 1)
+                            ndcg[at_k] += float(1 / np.log2(rank + 1))
         metrics = { 'loss': total_loss / (batch_idx + 1) }
         for at_k in hr.keys():
             metrics[f'HR{at_k}'] = hr[at_k] / total_samples if total_samples > 0 else 0.0
@@ -212,7 +214,7 @@ class Trainer:
 if __name__ == "__main__":
 
     ROOT_PATH = Path(__file__).parent
-    DATA_PATH = ROOT_PATH / "data" / "preprocessed"
+    DATA_PATH = ROOT_PATH / "data" / "amazon"
     LOGS_PATH = ROOT_PATH / "logs"
     LOG_FILE = LOGS_PATH / f"train_{cur_time}.log"
     SAVE_PATH = ROOT_PATH / "save"
@@ -225,23 +227,23 @@ if __name__ == "__main__":
         },
         'model': {
             'n_items': 286,  # Placeholder, should be set according to dataset
-            'hidden_dim': 512,
+            'hidden_dim': 256,
             'txt_dim': 768,
             'img_dim': 768,
             'n_heads': 8,
-            'n_layers': 2,
-            'ffn_dim': 2048,
+            'n_layers': 1,
+            'ffn_dim': 512,
             'max_seq_len': 50,
-            'dropout': 0.1,
+            'dropout': 0.3,
             'device': 'cuda' if torch.cuda.is_available() else 'cpu',
         },
         'train': {
             'save_path': str(SAVE_PATH),
-            'batch_size': 32,
-            'learning_rate': 3e-4,
-            'num_epochs': 20,
-            'log_interval': 20,
-            'early_stop': 3
+            'batch_size': 64,
+            'learning_rate': 2e-4,
+            'num_epochs': 100,
+            'log_interval': 40,
+            'early_stop': 5
         }
     }
     trainer = Trainer(config)

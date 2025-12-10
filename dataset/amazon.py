@@ -27,12 +27,13 @@ class AmazonDataset:
         self.data_path = Path(self.path)
 
         self._load_data()
-        # self._filter_data()
         self._load_other_data()
+        self.train_data, self.test_data = self._augment_and_add_and_split(self.collated_data, self.train_ratio)
         # self.all_data = self._augment_and_add(self.collated_data)
-        self.train_data, self.test_data = self.split_data(self.collated_data, self.train_ratio)
-        self.train_data = self._augment_and_add(self.train_data)
-        self.test_data = self._augment_and_add(self.test_data)
+        # self.train_data, self.test_data = self.split_data(self.all_data, self.train_ratio)
+        # self.train_data, self.test_data = self.split_data(self.collated_data, self.train_ratio)
+        # self.train_data = self._augment_and_add(self.train_data)
+        # self.test_data = self._augment_and_add(self.test_data)
 
     def _load_data(self):
         with open(self.data_path / 'collated_data.json', 'r') as f:
@@ -62,6 +63,29 @@ class AmazonDataset:
                     'interactions': cur_interactions.copy()
                 })
         return augmented_data
+
+    def _augment_and_add_and_split(self, data, train_ratio):
+        train_data = []
+        test_data = []
+        for inter_dict in data:
+            user_id = inter_dict['user_id']
+            inter_len = len(inter_dict['interactions'])
+            if  inter_len <= MIN_INTER_NUM:
+                continue
+            cur_interactions = inter_dict['interactions'][:MIN_INTER_NUM]
+            for i in range(MIN_INTER_NUM, inter_len):
+                cur_interactions.append(inter_dict['interactions'][i])
+                if i/inter_len < train_ratio:
+                    train_data.append({
+                        'user_id': user_id,
+                        'interactions': cur_interactions.copy()
+                    })
+                else:
+                    test_data.append({
+                        'user_id': user_id,
+                        'interactions': cur_interactions.copy()
+                    })
+        return train_data, test_data
 
     def split_data(self, data, train_ratio):
         n_total = len(data)

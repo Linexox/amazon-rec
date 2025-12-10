@@ -26,20 +26,20 @@ requirements.txt    # project dependencies
 
 - [x] 保留多模态信息的交互数据(`preprocess/raw_data_filter.ipynb`)
 - [x] 过滤掉交互次数过少或过多的用户和商品，以提高用户-物品交互图的稠密度(`preprocess/raw_data_filter.ipynb`)
-- [ ] 划分训练集、验证集和测试集
-- [ ] 提取文本特征
-- [ ] 提取图像特征
+- [x] 划分训练集、验证集和测试集
+- [x] 提取文本特征
+- [x] 提取图像特征
 - [ ] CLIP式的多模态特征融合
 
 #### 提取文本特征
 
-- [ ] 使用预训练语言模型（如BERT）提取商品描述的文本特征$\mathbf{f}_{\text{text}}$
+- [x] 使用预训练语言模型（如BERT）提取商品描述的文本特征$\mathbf{f}_{\text{text}}$
 
 #### 提取图像特征
 
 在`img_process.ipynb`中有将图片从url下载并返回原始向量的代码
-- [ ] 查看原始向量是否为图片展开flatten后的像素值，若是则需要进行预处理，以便模型处理
-- [ ] 使用预训练卷积神经网络（如ResNet、ViT）提取商品图片的图像特征$\mathbf{f}_{\text{image}}$
+- [x] 查看原始向量是否为图片展开flatten后的像素值，若是则需要进行预处理，以便模型处理
+- [x] 使用预训练卷积神经网络（如ResNet、ViT）提取商品图片的图像特征$\mathbf{f}_{\text{image}}$
 
 #### CLIP式多模态特征融合
 
